@@ -203,6 +203,10 @@ in {
       wantedBy = ["multi-user.target"];
       after = ["network-online.target"];
       wants = ["network-online.target"];
+      # The hook is a shell line written by whoever configures this, so give it
+      # the system's own tools rather than systemd's bare default. Add packages
+      # here from your own configuration if the hook needs more.
+      path = lib.optional (cfg.alarm.enable && cfg.alarm.command != "") "/run/current-system/sw";
       environment =
         {
           AIRGRADIENT_URL = cfg.sensorUrl;
@@ -216,9 +220,6 @@ in {
         // lib.optionalAttrs cfg.alarm.enable {
           ALARM_DEVICE = cfg.alarm.device;
           ALARM_COMMAND = cfg.alarm.command;
-          # The hook is a shell line written by whoever configures this, so
-          # give it the system's own tools rather than systemd's bare default.
-          PATH = "/run/current-system/sw/bin";
           ALARM_PATTERN = builtins.toJSON cfg.alarm.pattern;
           ALARM_CONSECUTIVE = toString cfg.alarm.consecutive;
           ALARM_REPEAT_SECONDS = toString cfg.alarm.repeatSeconds;
