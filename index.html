@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Air quality</title>
+<style>
+  :root {
+    --bg: #111418;
+    --card: #1b2026;
+    --grid: #2c333b;
+    --axis: #8b949e;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --bad: #f85149;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: "DejaVu Sans", system-ui, sans-serif; overflow: hidden; }
+  header { display: flex; justify-content: space-between; align-items: baseline;
+    padding: 14px 22px 4px; }
+  header h1 { margin: 0; font-size: 26px; font-weight: 600; }
+  header .status { font-size: 16px; color: var(--muted); }
+  header .status.stale { color: var(--bad); }
+  header .status.alarm { color: var(--bad); font-weight: 600; }
+  main { display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(2, 1fr);
+    gap: 14px; padding: 10px 22px 22px; height: calc(100% - 52px); }
+  .card { background: var(--card); border-radius: 10px; padding: 12px 14px 8px;
+    display: flex; flex-direction: column; min-height: 0;
+    border: 2px solid transparent; }
+  /* An out-of-range measure: red outline, red reading, and a slow pulse so it
+     is obvious from across the room even on a still photo of the screen. */
+  .card.alarm { border-color: var(--bad); animation: pulse 2s ease-in-out infinite; }
+  .card.alarm .value, .card.alarm .name { color: var(--bad); }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(248, 81, 73, 0); }
+    50% { box-shadow: 0 0 18px 2px rgba(248, 81, 73, 0.55); }
+  }
+  .head { display: flex; justify-content: space-between; align-items: baseline; }
+  .name { font-size: 18px; color: var(--muted); }
+  .value { font-size: 40px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .unit { font-size: 16px; color: var(--muted); margin-left: 4px; font-weight: 400; }
+  svg { flex: 1; width: 100%; min-height: 0; }
+  svg text { fill: var(--axis); font-size: 12px; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Air quality</h1>
+  <div class="status" id="status">waiting for the sensor…</div>
+</header>
+<main id="grid"></main>
+<script>
+const WINDOW = 3 * 3600;
+const MEASURES = [
+  // minSpan keeps a nearly flat measure from being zoomed in until its noise
+  // looks like weather.
+  { key: "pm02", name: "PM2.5", unit: "µg/m³", color: "#f0883e", floor: 0, digits: 1, minSpan: 10 },
+  { key: "rco2", name: "CO₂", unit: "ppm", color: "#58a6ff", floor: 400, digits: 0, minSpan: 300 },
+  { key: "atmp", name: "Temperature", unit: "°C", color: "#ff7b72", digits: 1, minSpan: 3 },
+  { key: "rhum", name: "Humidity", unit: "%", color: "#79c0ff", floor: 0, ceil: 100, digits: 0, minSpan: 15 },
+  { key: "pm01", name: "PM1", unit: "µg/m³", color: "#d29922", floor: 0, digits: 1, minSpan: 10 },
+  { key: "pm10", name: "PM10", unit: "µg/m³", color: "#db6d28", floor: 0, digits: 1, minSpan: 10 },
+  { key: "tvoc", name: "TVOC index", unit: "", color: "#3fb950", floor: 0, digits: 0, minSpan: 100 },
+  { key: "nox", name: "NOx index", unit: "", color: "#bc8cff", floor: 0, digits: 0, minSpan: 20 },
+];
+const NAMES = Object.fromEntries(MEASURES.map(m => [m.key, m.name]));
+
+const grid = document.getElementById("grid");
+for (const m of MEASURES) {
+  m.el = document.createElement("section");
+  m.el.className = "card";
+  m.el.innerHTML = `<div class="head"><span class="name">${m.name}</span>
+    <span><span class="value">–</span><span class="unit">${m.unit}</span></span></div>
+    <svg preserveAspectRatio="none"></svg>`;
+  grid.appendChild(m.el);
+}
+
+// Round axis steps to 1, 2 or 5 times a power of ten.
+function niceStep(span, count) {
+  const raw = span / count;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const norm = raw / mag;
+  return (norm < 1.5 ? 1 : norm < 3 ? 2 : norm < 7 ? 5 : 10) * mag;
+}
+
+function clock(t) {
+  const d = new Date(t * 1000);
+  return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+}
+
+function draw(m, rows, now, interval, limit, alarm) {
+  const svg = m.el.querySelector("svg");
+  const W = svg.clientWidth, H = svg.clientHeight;
+  const L = 44, R = 8, T = 8, B = 20;
+  const pts = rows.filter(r => typeof r[m.key] === "number").map(r => [r.t, r[m.key]]);
+  const last = pts[pts.length - 1];
+  m.el.querySelector(".value").textContent = last ? last[1].toFixed(m.digits) : "–";
+  m.el.classList.toggle("alarm", Boolean(alarm));
+
+  let lo = Math.min(...pts.map(p => p[1])), hi = Math.max(...pts.map(p => p[1]));
+  if (!pts.length) { lo = 0; hi = 1; }
+  const dataLo = lo, dataHi = hi;
+  if (hi - lo < 1e-9) { lo -= 1; hi += 1; }
+  if (m.minSpan && hi - lo < m.minSpan) {
+    const mid = (hi + lo) / 2;
+    lo = mid - m.minSpan / 2;
+    hi = mid + m.minSpan / 2;
+  }
+  const pad = (hi - lo) * 0.1;
+  lo -= pad; hi += pad;
+  // Keep the padding from dipping below a physical floor (or above a ceiling),
+  // but never cut off data that is actually outside it.
+  if (m.floor !== undefined && dataLo >= m.floor) lo = Math.max(lo, m.floor);
+  if (m.ceil !== undefined && dataHi <= m.ceil) hi = Math.min(hi, m.ceil);
+  const step = niceStep(hi - lo, 4);
+  lo = Math.floor(lo / step) * step;
+  hi = Math.ceil(hi / step) * step;
+
+  const t0 = now - WINDOW;
+  const x = t => L + (t - t0) / WINDOW * (W - L - R);
+  const y = v => T + (hi - v) / (hi - lo) * (H - T - B);
+
+  let out = "";
+  for (let v = lo; v <= hi + step / 2; v += step) {
+    out += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)"/>`;
+    out += `<text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${+v.toFixed(6)}</text>`;
+  }
+  const half = 1800;
+  for (let t = Math.ceil(t0 / half) * half; t <= now; t += half) {
+    out += `<line x1="${x(t)}" x2="${x(t)}" y1="${T}" y2="${H - B}" stroke="var(--grid)"/>`;
+    out += `<text x="${x(t)}" y="${H - 4}" text-anchor="middle">${clock(t)}</text>`;
+  }
+  // The limits themselves, but only where they fall inside the drawn range —
+  // a threshold far off the top would otherwise flatten the trace to nothing.
+  for (const bound of ["min", "max"]) {
+    const v = limit && limit[bound];
+    if (typeof v !== "number" || v < lo || v > hi) continue;
+    out += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--bad)"
+      stroke-width="1.5" stroke-dasharray="6 4" opacity="0.8"/>`;
+  }
+  // A gap of more than three polls (and at least five minutes, in case the
+  // poll interval changed) means the sensor was away: break the line.
+  const gap = Math.max(3 * interval, 300);
+  let d = "", prev = null;
+  for (const [t, v] of pts) {
+    d += (prev === null || t - prev > gap ? "M" : "L") + x(t).toFixed(1) + "," + y(v).toFixed(1);
+    prev = t;
+  }
+  out += `<clipPath id="clip-${m.key}"><rect x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}"/></clipPath>`;
+  out += `<path clip-path="url(#clip-${m.key})" d="${d}" fill="none" stroke="${m.color}" stroke-width="2.5" stroke-linejoin="round"/>`;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.innerHTML = out;
+}
+
+async function refresh() {
+  const status = document.getElementById("status");
+  try {
+    const res = await fetch("/data", { cache: "no-store" });
+    const data = await res.json();
+    const rows = data.readings;
+    const limits = data.limits || {};
+    const alarms = data.alarms || {};
+    for (const m of MEASURES) draw(m, rows, data.now, data.interval, limits[m.key], alarms[m.key]);
+    const last = rows.length ? rows[rows.length - 1].t : null;
+    const age = last === null ? Infinity : data.now - last;
+    const stale = age > 5 * data.interval;
+    // The alarm speaks first: it is the only thing on this page worth reading
+    // from the other side of the room.
+    const bad = Object.keys(alarms).filter(k => k !== "sensor");
+    if (bad.length) {
+      const words = bad.map(k => `${NAMES[k] || k} too ${alarms[k]}`).join(", ");
+      status.className = "status alarm";
+      status.textContent = words + (data.muted ? " (muted)" : "");
+    } else {
+      status.className = "status" + (stale ? " stale" : "");
+      status.textContent = last === null
+        ? (data.error ? "sensor unreachable: " + data.error : "waiting for the first reading…")
+        : (stale ? `no reading since ${clock(last)}` : `updated ${clock(last)}`);
+    }
+  } catch (e) {
+    status.className = "status stale";
+    status.textContent = "dashboard service unreachable";
+  }
+}
+
+refresh();
+setInterval(refresh, 30000);
+window.addEventListener("resize", refresh);
+</script>
+</body>
+</html>
