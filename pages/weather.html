@@ -164,9 +164,9 @@ function drawSun(d) {
   const label = now < rise ? "before sunrise"
     : now > set ? "after sunset"
     : `${Math.floor(left / 60)} h ${left % 60} min of daylight left`;
-  // Inside the arc, not on the baseline: down there it collides with the
-  // sunrise and sunset times at either end.
-  out += `<text x="${cx}" y="${base - 14}" text-anchor="middle" style="fill:var(--text);font-size:15px">${label}</text>`;
+  // Well inside the dome. On the baseline it runs into the sunrise and sunset
+  // times at either end, which is exactly where a wide label reaches.
+  out += `<text x="${cx}" y="${base - radius * 0.45}" text-anchor="middle" style="fill:var(--text);font-size:15px">${label}</text>`;
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   svg.innerHTML = out;
 }
@@ -196,7 +196,9 @@ function drawRain(d) {
     out += `<line x1="${L}" x2="${W - R}" y1="${yP(p)}" y2="${yP(p)}" stroke="var(--grid)"/>`;
     out += `<text x="${L - 6}" y="${yP(p) + 4}" text-anchor="end">${p}%</text>`;
   }
-  out += `<text x="${W - R + 6}" y="${yM(peak) + 4}">${peak.toFixed(1)}mm</text>`;
+  // Inside the plot, anchored to its right edge: at x = W - R + 6 the label
+  // ran off the card.
+  out += `<text x="${W - R - 4}" y="${T + 12}" text-anchor="end">peak ${peak.toFixed(1)} mm</text>`;
   for (const i of idx) {
     const d2 = new Date(times[i]);
     if (d2.getHours() % 6 === 0) {

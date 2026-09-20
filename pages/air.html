@@ -97,8 +97,17 @@ function draw(m, rows, now, interval, limit, alarm) {
   m.el.querySelector(".value").textContent = last ? last[1].toFixed(m.digits) : "–";
   m.el.classList.toggle("alarm", Boolean(alarm));
 
-  let lo = Math.min(...pts.map(p => p[1])), hi = Math.max(...pts.map(p => p[1]));
-  if (!pts.length) { lo = 0; hi = 1; }
+  // Scale to percentiles rather than to the extremes. Somebody breathing near
+  // the sensor sends CO₂ past 6000 ppm and humidity to 80 % for a minute or
+  // two; scaling to that flattens three hours of real signal into a line along
+  // the bottom. The excursion still draws, clipped, so it is not hidden.
+  const sorted = pts.map(p => p[1]).sort((a, b) => a - b);
+  const pct = f => sorted[Math.max(0, Math.min(sorted.length - 1, Math.round(f * (sorted.length - 1))))];
+  let lo = pts.length ? pct(0.02) : 0;
+  let hi = pts.length ? pct(0.98) : 1;
+  // Whatever the card is showing must be somewhere on its own chart, even when
+  // that reading is itself the excursion.
+  if (last) { lo = Math.min(lo, last[1]); hi = Math.max(hi, last[1]); }
   const dataLo = lo, dataHi = hi;
   if (hi - lo < 1e-9) { lo -= 1; hi += 1; }
   if (m.minSpan && hi - lo < m.minSpan) {

@@ -68,15 +68,23 @@ function minutesUntil(ms, now) {
   return Math.round((ms - now) / 60000);
 }
 
+function clock(ms) {
+  const d = new Date(ms);
+  return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+}
+
 function row(dep, now, walk) {
   const mins = dep.at ? minutesUntil(dep.at, now) : null;
   const classes = ["dep"];
   if (dep.cancelled) classes.push("cancelled", "gone");
   else if (mins !== null && mins < walk) classes.push("gone");
   if (dep.delay > 0) classes.push("late");
+  // Past an hour a minute count stops being useful — "344 min" is a clock time
+  // written badly — and MVG does return the last service of the night.
   const when = dep.cancelled ? "cancelled"
     : mins === null ? "–"
     : mins <= 0 ? "now"
+    : mins > 60 ? clock(dep.at)
     : mins + "<small> min</small>";
   const delay = dep.delay > 0 ? `<small> +${dep.delay}</small>` : "";
   const type = (dep.type || "").toUpperCase();
