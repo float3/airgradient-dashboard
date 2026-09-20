@@ -1,33 +1,28 @@
 {
   lib,
-  stdenvNoCC,
-  python3,
-  makeWrapper,
+  rustPlatform,
 }:
-stdenvNoCC.mkDerivation {
+rustPlatform.buildRustPackage {
   pname = "airgradient-dashboard";
   version = "0.1.0";
 
   src = lib.fileset.toSource {
     root = ./.;
-    fileset = lib.fileset.unions [./server.py ./index.html];
+    fileset = lib.fileset.unions [
+      ./Cargo.toml
+      ./Cargo.lock
+      ./src
+      # The page is baked into the binary with include_str!.
+      ./index.html
+    ];
   };
 
-  nativeBuildInputs = [makeWrapper];
-  dontConfigure = true;
-  dontBuild = true;
-
-  installPhase = ''
-    runHook preInstall
-    mkdir -p $out/share/airgradient-dashboard
-    cp server.py index.html $out/share/airgradient-dashboard/
-    makeWrapper ${python3}/bin/python3 $out/bin/airgradient-dashboard \
-      --add-flags $out/share/airgradient-dashboard/server.py
-    runHook postInstall
-  '';
+  # The lock file is the source of truth, so there is no cargoHash to keep in
+  # step with it.
+  cargoLock.lockFile = ./Cargo.lock;
 
   meta = {
-    description = "Local history and charts for an AirGradient monitor";
+    description = "Local history, charts and an out-of-range alarm for an AirGradient monitor";
     homepage = "https://github.com/float3/airgradient-dashboard";
     license = lib.licenses.mit;
     mainProgram = "airgradient-dashboard";

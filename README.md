@@ -25,13 +25,28 @@ display usually rotates through several pages, so the charts are on screen only
 part of the time; an alarm driven by the browser would stay quiet the rest of
 it.
 
-### Why the PC speaker
+### How the alarm reaches you
 
-On the host this was written for, every sound card is wired to an FM
-transmitter, so an alarm played through a sink would have been broadcast
-instead of heard. The motherboard beeper is the one output that is always in
-the room. Set `services.airgradient-dashboard.alarm.device` if yours is
-somewhere else, or `alarm.enable = false` to keep only the red outline.
+The service itself can do two things, and neither assumes a sound card:
+
+- `alarm.device` writes `EV_SND` tones to an evdev node, normally the PC
+  speaker.
+- `alarm.command` runs a shell line whenever the set of alarms *changes*, with
+  `ALARM_STATE`, `ALARM_MEASURES` and `ALARM_TEXT` in the environment. It fires
+  on transitions only, never on the repeat, which is what a push notification
+  wants.
+
+Anything that needs the machine's sound hardware belongs in a user service that
+polls `/data` instead: this one runs as a `DynamicUser` with no seat and no
+access to anyone's audio session.
+
+**Do not assume the PC speaker works.** A machine that beeps at power-on often
+cannot be made to beep from Linux: on many small-form-factor boards the POST
+beep comes from the embedded controller, and the PIT speaker line that
+`pcspkr` drives is connected to nothing. The driver will accept your tones and
+report success while making no sound at all. Test with a long continuous tone
+before you rely on it, and check that the BIOS pin config is not merely
+claiming an internal speaker that was never fitted.
 
 ## Use it
 
@@ -52,6 +67,9 @@ somewhere else, or `alarm.enable = false` to keep only the red outline.
         max = 27;
       };
     };
+    alarm.command = ''
+      curl -fsS -H "Title: Air quality" -d "$ALARM_TEXT" https://ntfy.sh/my-topic
+    '';
   };
 }
 ```
@@ -95,8 +113,12 @@ bad.
 ## Run it by hand
 
 ```sh
-AIRGRADIENT_URL=http://192.168.1.80 STATE_DIRECTORY=/tmp/ag python3 server.py
+AIRGRADIENT_URL=http://192.168.1.80 STATE_DIRECTORY=/tmp/ag cargo run --release
 ```
 
-Then open <http://127.0.0.1:8123>. The server is Python standard library only —
-no dependencies — and the page is plain HTML with hand-drawn SVG, no libraries.
+Then open <http://127.0.0.1:8123>. Every option is an environment variable;
+`module.nix` is only a typed front end to them.
+
+The server is Rust, and the page it serves is baked into the binary, so the
+service is a single artifact with nothing beside it to install. The page itself
+is plain HTML with hand-drawn SVG and no libraries.

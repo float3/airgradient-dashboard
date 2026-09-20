@@ -108,19 +108,44 @@ in {
         type = lib.types.bool;
         default = true;
         description = ''
-          Sound the machine's own beeper while any measure is out of range.
-
-          This deliberately uses the PC speaker rather than a sound card: on a
-          host whose outputs are wired to something else (an amplifier, a
-          transmitter, a pair of headphones nobody is wearing) an alarm played
-          through a sink is an alarm nobody hears.
+          Act on a measure leaving its range. Turning this off keeps the
+          ranges, the red outline on the page and the `alarms` field of
+          `/data`, and only stops this service making noise or running the
+          hook.
         '';
       };
 
       device = lib.mkOption {
         type = lib.types.str;
-        default = "/dev/input/by-path/platform-pcspkr-event-spkr";
-        description = "evdev node that accepts EV_SND tones.";
+        default = "";
+        example = "/dev/input/by-path/platform-pcspkr-event-spkr";
+        description = ''
+          evdev node that accepts EV_SND tones, usually the PC speaker. Empty
+          means no sound from this service.
+
+          Not every machine that beeps at power-on can be made to beep from
+          Linux: on many small-form-factor boards the POST beep comes from the
+          embedded controller and the PIT speaker line drives nothing. Check
+          with a long tone before relying on it.
+        '';
+      };
+
+      command = lib.mkOption {
+        type = lib.types.lines;
+        default = "";
+        example = ''
+          curl -fsS -H "Title: Air quality" -d "$ALARM_TEXT" https://ntfy.sh/my-topic
+        '';
+        description = ''
+          Shell run whenever the set of alarms changes, with `ALARM_STATE`
+          (`raised`, `changed` or `cleared`), `ALARM_MEASURES`
+          (`rco2=high,atmp=low`) and `ALARM_TEXT` in the environment.
+
+          This fires on transitions only, never on the repeat, so it suits a
+          push notification. Anything that needs the room's sound hardware
+          belongs in a user service instead: this one runs as a DynamicUser
+          with no seat.
+        '';
       };
 
       pattern = lib.mkOption {
@@ -169,7 +194,9 @@ in {
 
   config = lib.mkIf cfg.enable {
     # The beeper is a module, and nothing else on a headless box loads it.
-    boot.kernelModules = lib.mkIf cfg.alarm.enable ["pcspkr"];
+    boot.kernelModules =
+      lib.mkIf (cfg.alarm.enable && lib.hasInfix "pcspkr" cfg.alarm.device)
+      ["pcspkr"];
 
     systemd.services.airgradient-dashboard = {
       description = "AirGradient history and charts";
@@ -188,6 +215,10 @@ in {
         }
         // lib.optionalAttrs cfg.alarm.enable {
           ALARM_DEVICE = cfg.alarm.device;
+          ALARM_COMMAND = cfg.alarm.command;
+          # The hook is a shell line written by whoever configures this, so
+          # give it the system's own tools rather than systemd's bare default.
+          PATH = "/run/current-system/sw/bin";
           ALARM_PATTERN = builtins.toJSON cfg.alarm.pattern;
           ALARM_CONSECUTIVE = toString cfg.alarm.consecutive;
           ALARM_REPEAT_SECONDS = toString cfg.alarm.repeatSeconds;
@@ -206,7 +237,7 @@ in {
           RestartSec = 5;
         }
         # The beeper is an input device, owned by the input group.
-        // lib.optionalAttrs cfg.alarm.enable {
+        // lib.optionalAttrs (cfg.alarm.enable && cfg.alarm.device != "") {
           SupplementaryGroups = ["input"];
         };
     };
