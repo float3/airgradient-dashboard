@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Departures</title>
+<style>
+  :root {
+    --bg: #111418;
+    --card: #1b2026;
+    --row: #222831;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --late: #f0883e;
+    --bad: #f85149;
+    --ubahn: #2b6ebd;
+    --tram: #c0392b;
+    --bus: #1f7a4d;
+    --sbahn: #3fa14a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: "DejaVu Sans", system-ui, sans-serif; overflow: hidden; }
+  header { display: flex; justify-content: space-between; align-items: baseline;
+    padding: 12px 22px 2px; }
+  header h1 { margin: 0; font-size: 24px; font-weight: 600; }
+  header .status { font-size: 15px; color: var(--muted); }
+  header .status.stale { color: var(--bad); }
+  main { display: grid; gap: 14px; padding: 8px 22px 18px; height: calc(100% - 44px);
+    grid-auto-flow: column; grid-auto-columns: 1fr; }
+  .stop { background: var(--card); border-radius: 10px; padding: 10px 14px 6px;
+    display: flex; flex-direction: column; min-height: 0; }
+  .stop h2 { margin: 0 0 2px; font-size: 20px; font-weight: 600; }
+  .stop .walk { font-size: 14px; color: var(--muted); margin-bottom: 6px; }
+  .rows { flex: 1; min-height: 0; overflow: hidden; }
+  .dep { display: grid; grid-template-columns: 62px 1fr auto; align-items: center;
+    gap: 10px; padding: 7px 8px; border-radius: 7px; }
+  .dep:nth-child(odd) { background: var(--row); }
+  .line { font-size: 19px; font-weight: 700; text-align: center; border-radius: 6px;
+    padding: 3px 0; color: #fff; }
+  .line.UBAHN { background: var(--ubahn); }
+  .line.TRAM { background: var(--tram); }
+  .line.BUS, .line.REGIONAL_BUS { background: var(--bus); }
+  .line.SBAHN { background: var(--sbahn); }
+  .dest { font-size: 19px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .when { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums;
+    text-align: right; white-space: nowrap; }
+  .when small { font-size: 14px; color: var(--muted); font-weight: 400; }
+  .late .when { color: var(--late); }
+  /* Too soon to walk there, or not running at all: shown, but clearly not an
+     option, because a board that hides them looks like the service is thinner
+     than it is. */
+  .gone { opacity: 0.38; }
+  .cancelled .dest { text-decoration: line-through; }
+  .cancelled .when { color: var(--bad); font-size: 18px; }
+  .empty { color: var(--muted); font-size: 17px; padding: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Departures</h1>
+  <div class="status" id="status">loading…</div>
+</header>
+<main id="board"></main>
+<script>
+const TYPE = { UBAHN: "U", SBAHN: "S", TRAM: "T", BUS: "B", REGIONAL_BUS: "B" };
+
+function minutesUntil(ms, now) {
+  return Math.round((ms - now) / 60000);
+}
+
+function row(dep, now, walk) {
+  const mins = dep.at ? minutesUntil(dep.at, now) : null;
+  const classes = ["dep"];
+  if (dep.cancelled) classes.push("cancelled", "gone");
+  else if (mins !== null && mins < walk) classes.push("gone");
+  if (dep.delay > 0) classes.push("late");
+  const when = dep.cancelled ? "cancelled"
+    : mins === null ? "–"
+    : mins <= 0 ? "now"
+    : mins + "<small> min</small>";
+  const delay = dep.delay > 0 ? `<small> +${dep.delay}</small>` : "";
+  const type = (dep.type || "").toUpperCase();
+  const label = dep.line || TYPE[type] || "?";
+  return `<div class="${classes.join(" ")}">
+    <div class="line ${type}">${label}</div>
+    <div class="dest">${dep.destination || ""}</div>
+    <div class="when">${when}${delay}</div>
+  </div>`;
+}
+
+function draw(stops, now) {
+  const board = document.getElementById("board");
+  board.innerHTML = stops.map(stop => {
+    const walk = stop.walkMinutes || 0;
+    const rows = (stop.departures || []).map(d => row(d, now, walk)).join("")
+      || '<div class="empty">no departures listed</div>';
+    return `<section class="stop">
+      <h2>${stop.name}</h2>
+      <div class="walk">${walk > 0 ? walk + " min walk" : "&nbsp;"}</div>
+      <div class="rows">${rows}</div>
+    </section>`;
+  }).join("");
+}
+
+async function refresh() {
+  const status = document.getElementById("status");
+  try {
+    const res = await fetch("/transit/data", { cache: "no-store" });
+    const body = await res.json();
+    const stops = body.data && body.data.stops;
+    if (!stops || !stops.length) {
+      status.className = "status stale";
+      status.textContent = body.error ? "MVG unreachable: " + body.error : "waiting for departures…";
+      return;
+    }
+    // Count from the moment the answer was fetched, not from when this page
+    // happens to redraw, or a cached answer silently ages into the past.
+    draw(stops, Date.now());
+    const stale = body.age > 3 * body.interval;
+    status.className = "status" + (stale ? " stale" : "");
+    status.textContent = body.error ? "some stops failing: " + body.error
+      : stale ? `${Math.round(body.age / 60)} min old` : "live";
+  } catch (e) {
+    status.className = "status stale";
+    status.textContent = "dashboard service unreachable";
+  }
+}
+
+refresh();
+// Redraw every ten seconds: the numbers are minutes, and a board that is a
+// minute out is worse than useless to someone deciding whether to run.
+setInterval(refresh, 10000);
+window.addEventListener("resize", refresh);
+</script>
+</body>
+</html>

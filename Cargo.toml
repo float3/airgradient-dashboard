@@ -1,18 +1,18 @@
 [package]
-name = "airgradient-dashboard"
-version = "0.1.0"
+name = "wall-dashboards"
+version = "0.2.0"
 edition = "2021"
-description = "Local history, charts and an out-of-range alarm for an AirGradient monitor"
-homepage = "https://github.com/float3/airgradient-dashboard"
+description = "Air quality, weather and departure panels for a wall display"
+homepage = "https://github.com/float3/wall-dashboards"
 license = "MIT"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tiny_http = "0.12"
-# The monitor is on the LAN and speaks plain HTTP, so the TLS stack that ureq
-# pulls in by default would be dead weight in the closure.
-ureq = { version = "2", default-features = false }
+# TLS is needed: the air sensor is plain HTTP on the LAN, but the weather and
+# departure feeds are both HTTPS.
+ureq = "2"
 
 [profile.release]
 lto = true

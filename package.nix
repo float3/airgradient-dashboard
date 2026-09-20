@@ -3,8 +3,8 @@
   rustPlatform,
 }:
 rustPlatform.buildRustPackage {
-  pname = "airgradient-dashboard";
-  version = "0.1.0";
+  pname = "wall-dashboards";
+  version = "0.2.0";
 
   src = lib.fileset.toSource {
     root = ./.;
@@ -12,8 +12,8 @@ rustPlatform.buildRustPackage {
       ./Cargo.toml
       ./Cargo.lock
       ./src
-      # The page is baked into the binary with include_str!.
-      ./index.html
+      # The pages are baked into the binary with include_str!.
+      ./pages
     ];
   };
 
@@ -22,10 +22,10 @@ rustPlatform.buildRustPackage {
   cargoLock.lockFile = ./Cargo.lock;
 
   meta = {
-    description = "Local history, charts and an out-of-range alarm for an AirGradient monitor";
-    homepage = "https://github.com/float3/airgradient-dashboard";
+    description = "Air quality, weather and departure panels for a wall display";
+    homepage = "https://github.com/float3/wall-dashboards";
     license = lib.licenses.mit;
-    mainProgram = "airgradient-dashboard";
+    mainProgram = "wall-dashboards";
     platforms = lib.platforms.linux;
   };
 }

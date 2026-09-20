@@ -155,7 +155,7 @@ function draw(m, rows, now, interval, limit, alarm) {
 async function refresh() {
   const status = document.getElementById("status");
   try {
-    const res = await fetch("/data", { cache: "no-store" });
+    const res = await fetch("/air/data", { cache: "no-store" });
     const data = await res.json();
     const rows = data.readings;
     const limits = data.limits || {};

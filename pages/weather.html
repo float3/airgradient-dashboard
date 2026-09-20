@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Weather</title>
+<style>
+  :root {
+    --bg: #111418;
+    --card: #1b2026;
+    --grid: #2c333b;
+    --axis: #8b949e;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --rain: #58a6ff;
+    --warm: #ff7b72;
+    --cool: #79c0ff;
+    --sun: #f0c674;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: "DejaVu Sans", system-ui, sans-serif; overflow: hidden; }
+  header { display: flex; justify-content: space-between; align-items: baseline;
+    padding: 12px 22px 2px; }
+  header h1 { margin: 0; font-size: 24px; font-weight: 600; }
+  header .status { font-size: 15px; color: var(--muted); }
+  header .status.stale { color: var(--warm); }
+  main { display: grid; gap: 12px; padding: 8px 22px 18px; height: calc(100% - 44px);
+    grid-template-columns: 1.15fr 1fr;
+    grid-template-rows: auto 1fr auto auto;
+    grid-template-areas: "now sun" "rain rain" "days days" "outlook outlook"; }
+  .card { background: var(--card); border-radius: 10px; padding: 10px 14px;
+    display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+  .card > h2 { margin: 0 0 6px; font-size: 15px; font-weight: 500; color: var(--muted); }
+
+  #now { grid-area: now; }
+  .reading { display: flex; align-items: center; gap: 18px; }
+  .reading .temp { font-size: 62px; font-weight: 600; line-height: 1;
+    font-variant-numeric: tabular-nums; }
+  .reading .desc { font-size: 20px; }
+  .reading .sub { font-size: 16px; color: var(--muted); margin-top: 4px; }
+  .facts { display: flex; gap: 22px; margin-top: 8px; flex-wrap: wrap; }
+  .fact { font-size: 16px; color: var(--muted); }
+  .fact b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  #sun { grid-area: sun; }
+  #rain { grid-area: rain; }
+  #rain svg, #sun svg { flex: 1; width: 100%; min-height: 0; }
+  /* The arc is the whole point of this card, so give it room even when the
+     row is sized by the card beside it. */
+  #sun svg { min-height: 132px; }
+  svg text { fill: var(--axis); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+  #days { grid-area: days; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+    background: none; padding: 0; }
+  .day { background: var(--card); border-radius: 10px; padding: 10px 14px; }
+  .day .name { font-size: 17px; font-weight: 600; }
+  .day .row { display: flex; align-items: center; gap: 12px; margin-top: 4px; }
+  .day .hi { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .day .lo { font-size: 20px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .day .meta { font-size: 14px; color: var(--muted); margin-top: 2px; }
+  .day .wet { color: var(--rain); }
+
+  #outlook { grid-area: outlook; }
+  .strip { display: flex; gap: 6px; }
+  .strip .d { flex: 1; text-align: center; font-size: 13px; color: var(--muted); min-width: 0; }
+  .strip .d .n { font-weight: 600; color: var(--text); }
+  .strip .d .t { font-variant-numeric: tabular-nums; font-size: 15px; color: var(--text); }
+  .strip .d .p { color: var(--rain); font-variant-numeric: tabular-nums; }
+  .strip .d.today .n { color: var(--sun); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Weather</h1>
+  <div class="status" id="status">loading…</div>
+</header>
+<main>
+  <section class="card" id="now"><h2>Now</h2><div id="nowBody"></div></section>
+  <section class="card" id="sun"><h2>Daylight</h2><svg preserveAspectRatio="none"></svg></section>
+  <section class="card" id="rain"><h2>Next 24 hours</h2><svg preserveAspectRatio="none"></svg></section>
+  <section id="days"></section>
+  <section class="card" id="outlook"><h2>Outlook</h2><div class="strip" id="strip"></div></section>
+</main>
+<script>
+// WMO weather codes, grouped the way a person actually cares about them.
+const CODES = {
+  0: ["Clear", "sun"], 1: ["Mostly clear", "sun"], 2: ["Partly cloudy", "cloud"],
+  3: ["Overcast", "cloud"], 45: ["Fog", "fog"], 48: ["Rime fog", "fog"],
+  51: ["Light drizzle", "rain"], 53: ["Drizzle", "rain"], 55: ["Heavy drizzle", "rain"],
+  56: ["Freezing drizzle", "rain"], 57: ["Freezing drizzle", "rain"],
+  61: ["Light rain", "rain"], 63: ["Rain", "rain"], 65: ["Heavy rain", "rain"],
+  66: ["Freezing rain", "rain"], 67: ["Freezing rain", "rain"],
+  71: ["Light snow", "snow"], 73: ["Snow", "snow"], 75: ["Heavy snow", "snow"],
+  77: ["Snow grains", "snow"], 80: ["Showers", "rain"], 81: ["Showers", "rain"],
+  82: ["Violent showers", "rain"], 85: ["Snow showers", "snow"], 86: ["Snow showers", "snow"],
+  95: ["Thunderstorm", "storm"], 96: ["Thunderstorm, hail", "storm"], 99: ["Thunderstorm, hail", "storm"],
+};
+const GLYPH = { sun: "☀", cloud: "☁", rain: "🌧", snow: "❄", fog: "🌫", storm: "⛈" };
+function describe(code) { return CODES[code] || ["—", "cloud"]; }
+
+function clock(iso) {
+  const d = new Date(iso);
+  return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+}
+function dayName(iso, i) {
+  if (i === 0) return "Today";
+  if (i === 1) return "Tomorrow";
+  return new Date(iso).toLocaleDateString(undefined, { weekday: "long" });
+}
+function shortDay(iso) {
+  return new Date(iso).toLocaleDateString(undefined, { weekday: "short" });
+}
+const round = n => (typeof n === "number" ? Math.round(n) : "–");
+
+function drawNow(d) {
+  const c = d.current, units = d.current_units || {};
+  const [desc, kind] = describe(c.weather_code);
+  const daily = d.daily;
+  document.getElementById("nowBody").innerHTML = `
+    <div class="reading">
+      <div style="font-size:52px">${GLYPH[kind]}</div>
+      <div>
+        <div><span class="temp">${round(c.temperature_2m)}</span>
+          <span style="font-size:24px;color:var(--muted)">${units.temperature_2m || "°C"}</span></div>
+        <div class="desc">${desc}</div>
+        <div class="sub">feels like ${round(c.apparent_temperature)}°</div>
+      </div>
+    </div>
+    <div class="facts">
+      <div class="fact">High <b>${round(daily.temperature_2m_max[0])}°</b></div>
+      <div class="fact">Low <b>${round(daily.temperature_2m_min[0])}°</b></div>
+      <div class="fact">Rain today <b>${(daily.precipitation_sum[0] ?? 0).toFixed(1)} mm</b>
+        (<b>${round(daily.precipitation_probability_max[0])}%</b>)</div>
+      <div class="fact">Wind <b>${round(c.wind_speed_10m)}</b> km/h</div>
+      <div class="fact">Humidity <b>${round(c.relative_humidity_2m)}%</b></div>
+    </div>`;
+}
+
+// Where the sun is between today's sunrise and sunset, and how much daylight
+// is left. The arc is the point of the panel; the numbers merely label it.
+function drawSun(d) {
+  const svg = document.querySelector("#sun svg");
+  const W = svg.clientWidth, H = svg.clientHeight;
+  const rise = new Date(d.daily.sunrise[0]).getTime();
+  const set = new Date(d.daily.sunset[0]).getTime();
+  const now = Date.now();
+  const pad = 34, base = H - 26, radius = Math.min((W - 2 * pad) / 2, base - 16);
+  const cx = W / 2;
+  let out = `<path d="M ${cx - radius} ${base} A ${radius} ${radius} 0 0 1 ${cx + radius} ${base}"
+    fill="none" stroke="var(--grid)" stroke-width="3"/>`;
+  out += `<line x1="${cx - radius - 10}" x2="${cx + radius + 10}" y1="${base}" y2="${base}"
+    stroke="var(--grid)" stroke-width="1.5"/>`;
+  const frac = Math.min(1, Math.max(0, (now - rise) / (set - rise)));
+  if (now >= rise && now <= set) {
+    const angle = Math.PI * (1 - frac);
+    const x = cx + radius * Math.cos(angle), y = base - radius * Math.sin(angle);
+    out += `<path d="M ${cx - radius} ${base} A ${radius} ${radius} 0 0 1 ${x} ${y}"
+      fill="none" stroke="var(--sun)" stroke-width="3"/>`;
+    out += `<circle cx="${x}" cy="${y}" r="9" fill="var(--sun)"/>`;
+  }
+  out += `<text x="${cx - radius}" y="${base + 18}" text-anchor="middle">${clock(d.daily.sunrise[0])}</text>`;
+  out += `<text x="${cx + radius}" y="${base + 18}" text-anchor="middle">${clock(d.daily.sunset[0])}</text>`;
+  const left = Math.max(0, Math.round((set - now) / 60000));
+  const label = now < rise ? "before sunrise"
+    : now > set ? "after sunset"
+    : `${Math.floor(left / 60)} h ${left % 60} min of daylight left`;
+  // Inside the arc, not on the baseline: down there it collides with the
+  // sunrise and sunset times at either end.
+  out += `<text x="${cx}" y="${base - 14}" text-anchor="middle" style="fill:var(--text);font-size:15px">${label}</text>`;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.innerHTML = out;
+}
+
+// Precipitation probability as an area, with actual millimetres as bars over
+// it: the chance of rain and how much rain are different questions.
+function drawRain(d) {
+  const svg = document.querySelector("#rain svg");
+  const W = svg.clientWidth, H = svg.clientHeight;
+  const L = 38, R = 38, T = 8, B = 20;
+  const times = d.hourly.time, prob = d.hourly.precipitation_probability,
+        mm = d.hourly.precipitation;
+  const now = Date.now();
+  let start = times.findIndex(t => new Date(t).getTime() >= now - 3600e3);
+  if (start < 0) start = 0;
+  const idx = [];
+  for (let i = start; i < Math.min(times.length, start + 25); i++) idx.push(i);
+  if (!idx.length) { svg.innerHTML = ""; return; }
+
+  const x = i => L + (i - idx[0]) / (idx.length - 1) * (W - L - R);
+  const yP = p => T + (1 - p / 100) * (H - T - B);
+  const peak = Math.max(1, ...idx.map(i => mm[i] || 0));
+  const yM = v => H - B - (v / peak) * (H - T - B) * 0.85;
+
+  let out = "";
+  for (const p of [0, 50, 100]) {
+    out += `<line x1="${L}" x2="${W - R}" y1="${yP(p)}" y2="${yP(p)}" stroke="var(--grid)"/>`;
+    out += `<text x="${L - 6}" y="${yP(p) + 4}" text-anchor="end">${p}%</text>`;
+  }
+  out += `<text x="${W - R + 6}" y="${yM(peak) + 4}">${peak.toFixed(1)}mm</text>`;
+  for (const i of idx) {
+    const d2 = new Date(times[i]);
+    if (d2.getHours() % 6 === 0) {
+      out += `<line x1="${x(i)}" x2="${x(i)}" y1="${T}" y2="${H - B}" stroke="var(--grid)"/>`;
+      out += `<text x="${x(i)}" y="${H - 4}" text-anchor="middle">${String(d2.getHours()).padStart(2, "0")}:00</text>`;
+    }
+  }
+  const width = Math.max(2, (W - L - R) / idx.length - 3);
+  for (const i of idx) {
+    const v = mm[i] || 0;
+    if (v <= 0) continue;
+    out += `<rect x="${x(i) - width / 2}" y="${yM(v)}" width="${width}" height="${H - B - yM(v)}"
+      fill="var(--rain)" opacity="0.35"/>`;
+  }
+  const line = idx.map((i, n) => (n ? "L" : "M") + x(i).toFixed(1) + "," + yP(prob[i] || 0).toFixed(1)).join("");
+  out += `<path d="${line}" fill="none" stroke="var(--rain)" stroke-width="2.5" stroke-linejoin="round"/>`;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.innerHTML = out;
+}
+
+function drawDays(d) {
+  const el = document.getElementById("days");
+  el.innerHTML = d.daily.time.slice(0, 3).map((iso, i) => {
+    const [desc, kind] = describe(d.daily.weather_code[i]);
+    const mm = d.daily.precipitation_sum[i] ?? 0;
+    const pop = d.daily.precipitation_probability_max[i];
+    return `<div class="day">
+      <div class="name">${dayName(iso, i)}</div>
+      <div class="row">
+        <div style="font-size:30px">${GLYPH[kind]}</div>
+        <div><span class="hi">${round(d.daily.temperature_2m_max[i])}°</span>
+          <span class="lo">${round(d.daily.temperature_2m_min[i])}°</span></div>
+      </div>
+      <div class="meta">${desc}</div>
+      <div class="meta ${mm > 0 ? "wet" : ""}">${round(pop)}% · ${mm.toFixed(1)} mm · wind ${round(d.daily.wind_speed_10m_max[i])} km/h</div>
+    </div>`;
+  }).join("");
+}
+
+// Everything past day three, deliberately thin: at ten days out the useful
+// signal is the shape of the week, not a number to plan around.
+function drawOutlook(d) {
+  const el = document.getElementById("strip");
+  el.innerHTML = d.daily.time.map((iso, i) => {
+    if (i < 3) return "";
+    const [, kind] = describe(d.daily.weather_code[i]);
+    const pop = d.daily.precipitation_probability_max[i];
+    return `<div class="d">
+      <div class="n">${shortDay(iso)}</div>
+      <div style="font-size:20px">${GLYPH[kind]}</div>
+      <div class="t">${round(d.daily.temperature_2m_max[i])}° <span style="color:var(--muted)">${round(d.daily.temperature_2m_min[i])}°</span></div>
+      <div class="p">${round(pop)}%</div>
+    </div>`;
+  }).join("") || '<div class="d">no further forecast</div>';
+}
+
+async function refresh() {
+  const status = document.getElementById("status");
+  try {
+    const res = await fetch("/weather/data", { cache: "no-store" });
+    const body = await res.json();
+    const d = body.data;
+    if (!d || !d.current) {
+      status.className = "status stale";
+      status.textContent = body.error ? "upstream unreachable: " + body.error : "waiting for the forecast…";
+      return;
+    }
+    drawNow(d); drawSun(d); drawRain(d); drawDays(d); drawOutlook(d);
+    // Open-Meteo is refetched on our own schedule, so say how old the numbers
+    // are rather than when the page last drew them.
+    const stale = body.age > 3 * body.interval;
+    status.className = "status" + (stale ? " stale" : "");
+    const mins = Math.round(body.age / 60);
+    status.textContent = (body.error ? "upstream failing, " : "") +
+      (mins < 1 ? "updated just now" : `updated ${mins} min ago`);
+  } catch (e) {
+    status.className = "status stale";
+    status.textContent = "dashboard service unreachable";
+  }
+}
+
+refresh();
+setInterval(refresh, 60000);
+window.addEventListener("resize", refresh);
+</script>
+</body>
+</html>
