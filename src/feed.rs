@@ -15,17 +15,19 @@ use serde_json::json;
 use crate::now;
 
 pub fn get_json(url: &str) -> Result<serde_json::Value, String> {
-    let agent = ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(15))
-        .build();
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(15)))
+        .build()
+        .into();
     // Read the body as text and parse it here rather than enabling ureq's own
     // json feature: it is the same work, one feature fewer.
     let text = agent
         .get(url)
-        .set("User-Agent", "wall-dashboards")
+        .header("User-Agent", "wall-dashboards")
         .call()
         .map_err(|e| e.to_string())?
-        .into_string()
+        .body_mut()
+        .read_to_string()
         .map_err(|e| e.to_string())?;
     serde_json::from_str(&text).map_err(|e| e.to_string())
 }
